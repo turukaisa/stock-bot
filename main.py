@@ -1,6 +1,5 @@
 # ✅ 株価予測Bot v1.4（東証プライム限定 + スコアTOP5を必ず表示）
 
-!pip install yfinance ta requests
 
 import yfinance as yf
 import pandas as pd
