@@ -1,6 +1,30 @@
-- name: Install dependencies
-  run: pip install yfinance pandas ta requests
-- name: Download CSV (update_db.py)
-  run: python update_db.py
-- name: Score & Slack notify (main.py)
-  run: python main.py
+name: Stock Daily Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 22 * * *'   # 毎日 7:30 JST
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+
+    # ✨ ここでジョブ全体に環境変数を渡す
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas ta requests
+
+      - name: Download CSV (update_db.py)
+        run: python update_db.py
+
+      - name: Score & Slack notify (main.py)
+        run: python main.py
