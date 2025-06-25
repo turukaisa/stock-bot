@@ -1,4 +1,3 @@
-# update_db.py（全銘柄の株価をまとめて保存）
 import pandas as pd
 import yfinance as yf
 import os
@@ -26,7 +25,11 @@ for code in codes:
 
 if all_data:
     df_all = pd.concat(all_data)
+
+    # ✅ 必要な列だけ選んで、列名も整える
+    df_all = df_all[["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume", "code"]]
     df_all.columns = ["date", "open", "high", "low", "close", "adj_close", "volume", "code"]
+
     df_all.to_parquet("data/price.parquet", index=False)
     print("✅ 保存完了：data/price.parquet")
 else:
