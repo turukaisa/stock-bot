@@ -1,36 +1,39 @@
+# update_db.py  ─ 確実版（CSV保存・必要列のみ・依存ゼロ）
+
 import pandas as pd
 import yfinance as yf
-import os
+import os, time
 
-os.makedirs("data", exist_ok=True)
+CSV_LIST = "jpx_prime.csv"     # 銘柄リスト
+DATA_DIR = "data"              # 保存フォルダ
+PERIOD   = "3mo"               # 3か月分
+WAIT_S   = 1                   # 連続DLの間隔（秒）
 
-df = pd.read_csv("jpx_prime.csv", dtype=str)
-codes = df["コード"].str.zfill(4).tolist()
+os.makedirs(DATA_DIR, exist_ok=True)
 
-all_data = []
+codes = (
+    pd.read_csv(CSV_LIST, dtype=str)["コード"]
+      .str.zfill(4)
+      .tolist()
+)
 
 for code in codes:
+    fn = f"{DATA_DIR}/{code}.csv"
+    if os.path.exists(fn):
+        print(f"✅ {code} 既に取得済み")
+        continue
+
+    print(f"📥 {code}.T ダウンロード中...")
     try:
-        symbol = f"{code}.T"
-        print(f"📥 {symbol} ダウンロード中...")
-        df_price = yf.download(symbol, period="3mo", interval="1d", progress=False)
-        if df_price.empty:
-            print(f"⚠️ {code} → データなし")
+        df = yf.download(f"{code}.T", period=PERIOD, interval="1d", progress=False)
+        if df.empty:
+            print(f"⚠️ {code} データなし")
             continue
-        df_price = df_price.reset_index()
-        df_price["code"] = code
 
-        # ✅ 必要な列だけ抽出して安全に整形
-        df_extracted = df_price[["Date", "Open", "High", "Low", "Close", "Volume", "code"]].copy()
-        df_extracted.columns = ["date", "open", "high", "low", "close", "volume", "code"]
-
-        all_data.append(df_extracted)
+        df = df.reset_index()[["Date", "Open", "High", "Low", "Close", "Volume"]]
+        df.columns = ["date", "open", "high", "low", "close", "volume"]
+        df.to_csv(fn, index=False)
+        print(f"📦 {code} 保存完了 ({len(df)} 行)")
+        time.sleep(WAIT_S)
     except Exception as e:
-        print(f"❌ {code} → エラー: {e}")
-
-if all_data:
-    df_all = pd.concat(all_data)
-    df_all.to_parquet("data/price.parquet", index=False)
-    print("✅ 保存完了：data/price.parquet")
-else:
-    print("⚠️ 有効なデータがありませんでした")
+        print(f"❌ {code} 取得失敗: {e}")
