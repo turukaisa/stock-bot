@@ -52,9 +52,20 @@ def run():
             if r and r["score"]<0: sell.append(r)
     top5=sorted(buy,key=lambda x:x["score"],reverse=True)[:5]
     now=datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%m/%d %H:%M")
-    msg=f"📈【買い候補 TOP5】({now})\n"
-    for i,r in enumerate(top5,1):
-        msg+=f"{i}. {r['code']} ▶ {r['score']}  {'/'.join(r['reasons'][:3])}\n"
+    # ▶ TOP5 メッセージ生成箇所 ------------------------
+msg = f"📈【買い候補 TOP5】({now})\n"
+for i, r in enumerate(top5, 1):
+    code   = r['code']
+    name   = df_codes.loc[df_codes["Code"] == code, "Name"].values[0]
+    score  = r['score']
+    # 内訳を日本語に置き換え
+    nicer  = [s.replace("GC", "ゴールデンクロス")
+                .replace("Vol", "出来高")
+                .replace("RSI", "RSI")
+                .replace("BB", "BB下限")
+             for s in r['reasons']]
+    msg += f"{i}. {code} {name} ▶ {score}\n　→ {'／'.join(nicer)}\n"
+
     msg+="\n📉【売却候補】\n"
     msg+="\n".join(f"- {r['code']} ▶ {r['score']}" for r in sell) or "該当なし"
     send(msg)
