@@ -8,7 +8,7 @@ WAIT_S   = 1
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
-codes = pd.read_csv(CSV_LIST, dtype=str)["コード"].str.zfill(4).tolist()
+codes = pd.read_csv(CSV_LIST, dtype=str)["Code"].str.zfill(4).tolist()
 
 for code in codes:
     fn = f"{DATA_DIR}/{code}.csv"
