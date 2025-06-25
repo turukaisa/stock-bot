@@ -1,4 +1,4 @@
-name: Update Stock DB
+name: Stock Daily Bot
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: '30 22 * * *'   # 毎日 7:30 JST
 
 jobs:
-  run-db-update:
+  daily:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -14,6 +14,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
-        run: pip install yfinance pandas
-      - name: Run update_db.py
+        run: pip install yfinance pandas ta requests
+      - name: Download CSV (update_db.py)
         run: python update_db.py
+      - name: Score & Slack notify (main.py)
+        run: python main.py
