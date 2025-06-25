@@ -14,10 +14,11 @@ SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL")
 # 🧾 保有銘柄（売却監視）
 my_holdings = ['2503', '4661', '5411', '8233', '8304']
 
-# 📥 CSVから銘柄リスト読み込み（かなさんのファイル形式に対応）
-df = pd.read_csv("jpx_prime.csv", dtype=str)
-df = df.rename(columns={"銘柄コード": "Code", "市場": "Market"})
+# 📥 JPX銘柄リスト（CSVから読み込む場合）
+df = pd.read_csv("jpx_prime.csv", dtype=str)  # ← ExcelでなくCSVになっていればこのままでOK
+df = df.rename(columns={"銘柄コード": "Code", "市場・商品区分": "Market"})  # ← 正しい日本語列名にあわせる
 df["Code"] = df["Code"].str.zfill(4)
+
 
 # 🎯 プライム銘柄のみ抽出
 tickers = {
