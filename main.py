@@ -1,126 +1,142 @@
-# 🚀 試運転版・株価予測Bot v1.9  （プライム限定CSV・JST表示・to_seriesで1次元化・必ずTOP5）
+# ==============================================
+# 📈 株価予測 Bot – 完全版 2025-06-25 (JST)
+#   • 東証プライム CSV 一括取得
+#   • yfinance 安定化（5s タイムアウト・2回リトライ）
+#   • Close/Volume 1次元化 & 欠損補完
+#   • 失敗銘柄も 0 点登録で必ず TOP5
+#   • Slack JST 表示
+# ==============================================
 
-import os, pandas as pd, yfinance as yf, ta, requests
+import os, time, requests, pandas as pd, yfinance as yf, ta
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-# ────── 設定 ──────
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")          # GitHub Secrets
-my_holdings = ["2503", "4661", "5411", "8233", "8304"]      # 特定口座
+# ────────── 環境変数 ──────────
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
-# ────── 銘柄リスト（プライムCSV）──────
-df = pd.read_csv("jpx_prime.csv", dtype=str)
-df = df.rename(columns={"コード": "Code", "市場・商品区分": "Market"})
-df["Code"] = df["Code"].str.zfill(4)
+# ────────── 定数 ──────────
+CSV_FILE        = "jpx_prime.csv"     # プライム銘柄のみ
+MIN_ROWS        = 30                  # ダウンロード最低行数
+DL_TIMEOUT      = 5                   # 秒
+RETRY           = 2                   # リトライ回数
+PLIME_BONUS     = 5                   # 市場加点
+HOLDINGS        = ["2503", "4661", "5411", "8233", "8304"]
 
-tickers = {code: "プライム" for code in df["Code"]}         # 全銘柄プライム扱い
-def get_market_score(_): return 5                           # 固定+5
-
-# ────── ヘルパー ──────
-def to_series(col):
-    """Close/Volume が DataFrame や ndarray でも 1 次元 Series へ強制変換"""
+# ────────── ユーティリティ ──────────
+def _to_series(col):
+    """DataFrame/ndarray → Series へ 1 次元化"""
     if isinstance(col, pd.DataFrame):
         return col.iloc[:, 0]
     return pd.Series(col)
 
-# ────── 株価解析 ──────
-def analyze_stock(symbol: str):
-    try:
-        dfp = yf.download(f"{symbol}.T", period="3mo", interval="1d",
-                          auto_adjust=False, progress=False)
-        if dfp.empty or len(dfp) < 30:
-            return None
+def _download(code: str):
+    """yfinance ダウンロードを RETRY 回 リトライ"""
+    ticker = f"{code}.T"
+    for i in range(RETRY + 1):
+        try:
+            return yf.download(
+                ticker,
+                period="3mo",
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                timeout=DL_TIMEOUT,
+            )
+        except Exception as e:
+            if i == RETRY:
+                raise e
+            time.sleep(1)
 
-        dfp["Close"], dfp["Volume"] = to_series(dfp["Close"]), to_series(dfp["Volume"])
-        dfp[["Close", "Volume"]] = dfp[["Close", "Volume"]].ffill()
-
-        # 指標
-        dfp["sma5"]  = dfp["Close"].rolling(5).mean()
-        dfp["sma25"] = dfp["Close"].rolling(25).mean()
-        macd = ta.trend.MACD(dfp["Close"])
-        dfp["macd"], dfp["macd_signal"] = macd.macd(), macd.macd_signal()
-        dfp["rsi"]   = ta.momentum.RSIIndicator(dfp["Close"]).rsi()
-        bb           = ta.volatility.BollingerBands(dfp["Close"])
-        dfp["bb_low"]= bb.bollinger_lband()
-
-        latest, prev = dfp.iloc[-1], dfp.iloc[-2]
-        score, reasons = 0, []
-
-        # GC
-        if prev["sma5"] < prev["sma25"] and latest["sma5"] > latest["sma25"]:
-            pts = round(min(max((latest["sma5"]-latest["sma25"])/latest["sma25"],0),0.05)*300)
-            score += pts; reasons.append(f"GC(+{pts})")
-        # MACD
-        if prev["macd"] < prev["macd_signal"] and latest["macd"] > latest["macd_signal"]:
-            pts = round(min(max(latest["macd"]-latest["macd_signal"],0),0.5)*30)
-            score += pts; reasons.append(f"MACD(+{pts})")
-        # Volume
-        if latest["Volume"] > prev["Volume"]:
-            rate = latest["Volume"]/prev["Volume"]; pts = round(min((rate-1)*20,10))
-            score += pts; reasons.append(f"出来高(+{pts})")
-        # RSI
-        if latest["rsi"] < 30:
-            pts = 10 if latest["rsi"] < 20 else 5
-            score += pts; reasons.append(f"RSI(+{pts})")
-        # BB
-        if latest["Close"] < latest["bb_low"]:
-            pts = round(min((latest["bb_low"]-latest["Close"])/latest["bb_low"],0.03)*300)
-            score += pts; reasons.append(f"BB下限(+{pts})")
-        # 高値/安値
-        if latest["Close"] > dfp["Close"][-7:].max():
-            score += 5; reasons.append("高値(+5)")
-        if latest["Close"] < dfp["Close"][-7:].min():
-            score -= 10; reasons.append("安値割れ(-10)")
-
-        return {"symbol": symbol, "score": score, "reasons": reasons}
-
-    except Exception as e:
-        # エラー銘柄もスコア0で残す → 必ずTOP5埋まる
-        return {"symbol": symbol, "score": 0, "reasons": [f"解析エラー:{e}"]}
-
-# ────── Slack ──────
-def send_slack(text):
+def send_slack(text: str):
     if SLACK_WEBHOOK_URL:
         requests.post(SLACK_WEBHOOK_URL, json={"text": text})
 
-# ────── コメント ──────
-def comment(scores):
-    if not scores: return "データ不足で判定不能。"
-    avg = sum(scores)/len(scores)
-    if avg >= 70: return "今日は買い候補が強いです。複数銘柄の検討を。"
-    if avg >= 50: return "中程度のシグナルが見られます。選別判断を。"
-    if avg >= 30: return "弱め中心。慎重に。"
-    return "全体的に低調です。見送りも視野に。"
+# ────────── データ読み込み ──────────
+df_codes = (
+    pd.read_csv(CSV_FILE, dtype=str)
+    .rename(columns={"コード": "Code"})
+)
+df_codes["Code"] = df_codes["Code"].str.zfill(4)
+TICKERS = df_codes["Code"].tolist()
 
-# ────── メイン ──────
+# ────────── 株価分析 ──────────
+def analyze(code: str) -> dict:
+    try:
+        df = _download(code)
+        if df.empty or len(df) < MIN_ROWS:
+            raise ValueError("rows<MIN")
+
+        df["Close"], df["Volume"] = _to_series(df["Close"]), _to_series(df["Volume"])
+        df[["Close", "Volume"]] = df[["Close", "Volume"]].ffill()
+
+        df["sma5"]  = df["Close"].rolling(5).mean()
+        df["sma25"] = df["Close"].rolling(25).mean()
+        macd = ta.trend.MACD(df["Close"])
+        df["macd"], df["macd_s"] = macd.macd(), macd.macd_signal()
+        df["rsi"]   = ta.momentum.RSIIndicator(df["Close"]).rsi()
+        bb          = ta.volatility.BollingerBands(df["Close"])
+        df["bb_l"]  = bb.bollinger_lband()
+
+        latest, prev = df.iloc[-1], df.iloc[-2]
+        score, rs = 0, []
+
+        if prev["sma5"] < prev["sma25"] and latest["sma5"] > latest["sma25"]:
+            pts = round(min(max((latest["sma5"]-latest["sma25"])/latest["sma25"],0),0.05)*300)
+            score += pts; rs.append(f"GC+{pts}")
+        if prev["macd"] < prev["macd_s"] and latest["macd"] > latest["macd_s"]:
+            pts = round(min(max(latest["macd"]-latest["macd_s"],0),0.5)*30)
+            score += pts; rs.append(f"MACD+{pts}")
+        if latest["Volume"] > prev["Volume"]:
+            rate = latest["Volume"]/prev["Volume"]; pts = round(min((rate-1)*40,20))
+            score += pts; rs.append(f"Vol+{pts}")
+        if latest["rsi"] < 40:
+            pts = 10 if latest["rsi"] < 30 else 5
+            score += pts; rs.append(f"RSI+{pts}")
+        if latest["Close"] < df["bb_l"].iloc[-1]:
+            pts = round(min((df["bb_l"].iloc[-1]-latest["Close"])/df["bb_l"].iloc[-1],0.03)*300)
+            score += pts; rs.append(f"BB+{pts}")
+        if latest["Close"] > df["Close"][-7:].max():
+            score += 5;  rs.append("High+5")
+        if latest["Close"] < df["Close"][-7:].min():
+            score -= 10; rs.append("Low-10")
+
+        score += PLIME_BONUS
+        rs.append(f"Market+{PLIME_BONUS}")
+
+        return {"code": code, "score": score, "reasons": rs}
+    except Exception as e:
+        # 失敗は 0 点で返却、理由を残す
+        return {"code": code, "score": 0, "reasons": [f"ERR:{e.__class__.__name__}"]}
+
+# ────────── メイン ──────────
 def run():
     buy, sell, scores = [], [], []
 
-    for code, market in tickers.items():
-        res = analyze_stock(code)
-        res["score"] += get_market_score(market)
-        res["reasons"].append("市場(プライム:+5)")
+    for code in TICKERS:
+        res = analyze(code)
         buy.append(res); scores.append(res["score"])
 
-    for code in my_holdings:
-        res = analyze_stock(code)
+    for code in HOLDINGS:
+        res = analyze(code)
         if res["score"] < 0:
             sell.append(res)
 
-    # 強制TOP5
+    # TOP5（必ず5件）
     top5 = sorted(buy, key=lambda x: x["score"], reverse=True)[:5]
 
-    now  = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%m/%d %H:%M")
-    msg  = f"📈【買い候補 TOP5】({now})\n"
+    now = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%m/%d %H:%M")
+    msg = f"📈【買い候補 TOP5】({now})\n"
     for i, r in enumerate(top5, 1):
-        msg += f"{i}. {r['symbol']} ▶ {r['score']}\n　→ {'／'.join(r['reasons'][:4])}\n"
+        msg += f"{i}. {r['code']} ▶ {r['score']}\n　→ {'／'.join(r['reasons'][:4])}\n"
 
     msg += "\n📉【売却候補（保有銘柄）】\n"
-    msg += "\n".join([f"- {r['symbol']} ▶ {r['score']} → {'／'.join(r['reasons'][:3])}" for r in sell]) or "該当なし"
-    msg += f"\n\n🗨️ちゃちゃのひと言：\n{comment(scores)}"
+    msg += "\n".join(
+        f"- {r['code']} ▶ {r['score']} → {'／'.join(r['reasons'][:3])}"
+        for r in sell
+    ) or "該当なし"
 
     send_slack(msg)
 
-# ────── 実行 ──────
+# ────────── 実行 ──────────
 if __name__ == "__main__":
     run()
