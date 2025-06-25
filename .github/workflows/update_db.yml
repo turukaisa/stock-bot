@@ -1,25 +1,19 @@
 name: Update Stock DB
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: '30 22 * * *'  # 毎日 7:30 JST（22:30 UTC）
-  workflow_dispatch:      # 手動実行も可能にする
+    - cron: '30 22 * * *'   # 毎日 7:30 JST
 
 jobs:
   run-db-update:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install yfinance pandas
-
       - name: Run update_db.py
         run: python update_db.py
