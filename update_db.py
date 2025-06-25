@@ -19,19 +19,3 @@ for code in codes:
         print("✅", code, len(df))
     except Exception as e:
         print("❌", code, e)
-# 末尾に追加 ---------------------------
-      - name: Commit and push data
-        run: |
-          git config --local user.name  "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 追加・変更された CSV をステージ
-          git add data/*.csv
-
-          # 変更がある時だけコミット
-          if git diff --cached --quiet; then
-            echo "No data changes, skip commit"
-          else
-            git commit -m "Update price data ($(date +'%Y-%m-%d'))"
-            git push
-          fi
