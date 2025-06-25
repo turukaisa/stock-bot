@@ -19,17 +19,17 @@ for code in codes:
             continue
         df_price = df_price.reset_index()
         df_price["code"] = code
-        all_data.append(df_price)
+
+        # ✅ 必要な列だけ抽出して安全に整形
+        df_extracted = df_price[["Date", "Open", "High", "Low", "Close", "Volume", "code"]].copy()
+        df_extracted.columns = ["date", "open", "high", "low", "close", "volume", "code"]
+
+        all_data.append(df_extracted)
     except Exception as e:
         print(f"❌ {code} → エラー: {e}")
 
 if all_data:
     df_all = pd.concat(all_data)
-
-    # ✅ "Adj Close" を除外して使う
-    df_all = df_all[["Date", "Open", "High", "Low", "Close", "Volume", "code"]]
-    df_all.columns = ["date", "open", "high", "low", "close", "volume", "code"]
-
     df_all.to_parquet("data/price.parquet", index=False)
     print("✅ 保存完了：data/price.parquet")
 else:
