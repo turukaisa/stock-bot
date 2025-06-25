@@ -16,17 +16,11 @@ my_holdings = ['2503', '4661', '5411', '8233', '8304']
 
 # 📥 JPX銘柄リスト（CSVから読み込む場合）
 df = pd.read_csv("jpx_prime.csv", dtype=str)
-df = df.rename(columns={"コード": "Code", "市場・商品区分": "Market"})  # ← ここを "銘柄コード" → "コード" に修正
+df = df.rename(columns={"コード": "Code", "市場・商品区分": "Market"})
 df["Code"] = df["Code"].str.zfill(4)
 
-
-
-# 🎯 プライム銘柄のみ抽出
-tickers = {
-    code: market
-    for code, market in zip(df["Code"], df["Market"])
-    if "プライム" in market
-}
+# 🎯 フィルターは不要！ → すべてプライムとして登録
+tickers = {code: "プライム" for code in df["Code"]}
 
 # 🎁 市場加点
 def get_market_score(market):
