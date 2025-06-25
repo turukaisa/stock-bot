@@ -1,4 +1,3 @@
-# main.py ─ data/*.csv を読んで TOP5 を Slack 通知
 import glob, os, pandas as pd, ta, requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -10,7 +9,16 @@ HOLDINGS = ["2503","4661","5411","8233","8304"]
 def score_one(path):
     code = os.path.basename(path).split(".")[0]
     df = pd.read_csv(path, parse_dates=["date"])
+    # ▼ 不正CSVを弾く
+    req_cols = {"open","high","low","close","volume"}
+    if not req_cols.issubset(df.columns):
+        print(f"⚠️ {code} 列不足 → スキップ"); return None
+    # 数値化（文字列→NaN を除外）
+    for col in req_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["close"])
     if len(df) < 30: return None
+
     df["sma5"]  = df["close"].rolling(5).mean()
     df["sma25"] = df["close"].rolling(25).mean()
     macd = ta.trend.MACD(df["close"])
@@ -30,8 +38,7 @@ def score_one(path):
     return {"code":code,"score":score,"reasons":rs}
 
 def send(text):
-    if SLACK_WEBHOOK_URL:
-        requests.post(SLACK_WEBHOOK_URL, json={"text":text})
+    if SLACK_WEBHOOK_URL: requests.post(SLACK_WEBHOOK_URL,json={"text":text})
 
 def run():
     buy=[]; sell=[]
